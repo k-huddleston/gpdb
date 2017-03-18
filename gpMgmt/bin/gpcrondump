@@ -19,6 +19,7 @@ try:
     import gpmfr
     import threading
     import yaml
+    import psutil
     from collections import defaultdict
     from getpass import getpass
     from gppylib import gplog
@@ -79,6 +80,11 @@ class GpCronDump(Operation):
             self.context.target_db = self.context.dump_databases[0]
 
         self.include_email_file = options.include_email_file
+
+        conflicting_database_name = self.get_conflicting_database_name()
+
+        if conflicting_database_name is not None :
+           raise ExceptionNoStackTraceNeeded("Already dumping database %s" %conflicting_database_name)
 
         if self.context.incremental and len(self.context.dump_databases) == 0:
             raise ExceptionNoStackTraceNeeded("Must supply -x <database name> with incremental option")
@@ -309,6 +315,38 @@ class GpCronDump(Operation):
                 self.context.full_dump_timestamp = get_latest_full_dump_timestamp(self.context)
             else:
                 self.context.full_dump_timestamp = get_latest_full_ts_with_nbu(self.context)
+
+    def get_conflicting_database_name(self):
+        #propsed_dummps = self.context.dump_databases
+
+        currently_dumping_databases = []
+        #databases we are passing in right now - self.context.dump_databases
+        #for database in self.context.dump_databases:
+        #psutil.Process()
+
+        #Looking at all the dumps that are currently running
+        for proc in psutil.process_iter():
+            commands = proc.cmdline()
+            if any("gpcrondump" in x for x in commands) and proc.name() == "Python":
+                self.find_database_name(commands, currently_dumping_databases)
+
+        return self.contains_the_same_database_name(self.context.dump_databases, currently_dumping_databases)
+
+
+    def contains_the_same_database_name(self, proposed_databases, currently_dumping_databases ):
+        for item in proposed_databases:
+            if item in currently_dumping_databases:
+                return item
+        return None
+
+    def find_database_name(self, commands_list, databases_list):
+        if "-x" not in commands_list:
+            return databases_list.append(os.environ['PGDATABASE'])
+        for index, item in enumerate(commands_list):
+            if item == "-x" and index+1 < len(commands_list):
+                databases_list.append(commands_list[index+1])
+
+        return databases_list
 
     def validate_dump_schema(self):
         if self.context.dump_schema:
@@ -1483,6 +1521,5 @@ will be displayed.
     return parser
 
 if __name__ == '__main__':
-    sys.argv[0] = EXECNAME                                                              # for cli_help
-    simple_main(create_parser, GpCronDump, {"pidfilename" : GPCRONDUMP_PID_FILE,
-                                            "programNameOverride" : EXECNAME})        # for logger
+    sys.argv[0] = EXECNAME
+    simple_main(create_parser, GpCronDump, {"programNameOverride" : EXECNAME})        # for logger
